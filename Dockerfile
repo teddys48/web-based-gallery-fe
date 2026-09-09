@@ -29,12 +29,13 @@ server {
 
     # Proxy API requests to backend container or host
     location /api/ {
-        proxy_pass http://gallery-be:8080/api/;
+        proxy_pass http://gallery-be:8080;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
+
         proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 EOF

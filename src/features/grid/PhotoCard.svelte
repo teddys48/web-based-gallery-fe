@@ -54,7 +54,7 @@
 >
   <!-- Video Play Badge & Duration Overlay -->
   {#if isVideo}
-    <div class="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-full bg-black/65 px-2.5 py-1 text-white backdrop-blur-md shadow text-[10px] font-mono font-medium border border-white/10">
+    <div class="absolute top-2 right-2 z-2 flex items-center gap-1.5 rounded-full bg-black/65 px-2.5 py-1 text-white backdrop-blur-md shadow text-[10px] font-mono font-medium border border-white/10">
       <Play class="h-3 w-3 fill-white" />
       {#if durationText}
         <span>{durationText}</span>
@@ -73,20 +73,20 @@
 
   <!-- Hover Glass Overlay -->
   <div class="absolute inset-0 flex flex-col justify-between bg-gradient-to-t from-black/80 via-black/20 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-    <!-- Top info tag -->
+    <!-- Top info tags (Positioned on top-left to avoid colliding with top-right video play badge) -->
     <div class="flex items-center justify-between">
-      {#if photo.camera_make || photo.camera_model}
-        <span class="inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-md px-2 py-0.5 text-[10px] font-medium text-white/90">
-          <Camera class="h-3 w-3" />
-          {photo.camera_model || photo.camera_make}
+      <div class="flex items-center gap-1.5 max-w-[75%] truncate">
+        <span class="inline-flex items-center gap-1 rounded-md bg-black/65 backdrop-blur-md px-2 py-0.5 text-[10px] font-mono text-white/90 shadow-sm border border-white/10">
+          {fileSizeMb}MB
         </span>
-      {:else}
-        <div></div>
-      {/if}
 
-      <span class="inline-flex items-center gap-1 rounded-md bg-black/60 backdrop-blur-md px-2 py-0.5 text-[10px] font-mono text-white/80">
-        {fileSizeMb}MB
-      </span>
+        {#if photo.camera_make || photo.camera_model}
+          <span class="inline-flex items-center gap-1 rounded-md bg-black/65 backdrop-blur-md px-2 py-0.5 text-[10px] font-medium text-white/90 shadow-sm border border-white/10 truncate">
+            <Camera class="h-3 w-3 shrink-0" />
+            <span class="truncate">{photo.camera_model || photo.camera_make}</span>
+          </span>
+        {/if}
+      </div>
     </div>
 
     <!-- Bottom info bar -->

@@ -1,7 +1,7 @@
-import type { Photo, TimelineBucket, FolderNode, ScanStatus, PaginatedResponse, FolderContentsResponse, SubFolderNode } from '../types/photo';
+import type { Photo, TimelineBucket, FolderNode, ScanStatus, PaginatedResponse, FolderContentsResponse, SubFolderNode, FolderDateGroup } from '../types/photo';
 import { MOCK_PHOTOS_LIST, MOCK_TIMELINE_BUCKETS, MOCK_FOLDER_TREE, getMockPaginatedPhotos, SAMPLE_FALLBACK_IMAGES } from './mockData';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const FORCE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 
 let isBackendAvailable = true;
@@ -167,6 +167,7 @@ export function normalizeFolderTree(nodes: any[]): FolderNode[] {
       path: cleanPath,
       photo_count: n.photo_count || 0,
       thumbnail_path: n.thumbnail_path,
+      thumbnail_url: n.thumbnail_url,
       cover_photo_id: n.cover_photo_id,
       sub_folders: children,
       children
@@ -185,17 +186,43 @@ export function normalizeArray<T>(res: any, fallback: T[] = []): T[] {
 // Helper to normalize GET /api/v1/folders/contents
 export function normalizeFolderContents(res: any, defaultPath = '', defaultPage = 1, defaultLimit = 50): FolderContentsResponse {
   const current_folder = res?.data?.current_folder || defaultPath;
-  const parent_folder = res?.data?.parent_folder || (current_folder.includes('/') ? current_folder.split('/').slice(0, -1).join('/') : '');
+  const parent_folder = res?.data?.parent_folder !== undefined ? res.data.parent_folder : (current_folder.includes('/') ? current_folder.split('/').slice(0, -1).join('/') : '');
   const rawSubFolders = Array.isArray(res?.data?.sub_folders) ? res.data.sub_folders : [];
-  const photos: Photo[] = Array.isArray(res?.data?.photos) ? res.data.photos : [];
 
   const sub_folders: SubFolderNode[] = rawSubFolders.map((sub: any) => ({
     name: sub.name || (sub.path ? sub.path.split('/').pop() : 'Folder'),
     path: sub.path || '',
     photo_count: sub.photo_count || 0,
     thumbnail_path: sub.thumbnail_path,
+    thumbnail_url: sub.thumbnail_url,
     cover_photo_id: sub.cover_photo_id
   }));
+
+  const rawDateGroups = Array.isArray(res?.data?.date_groups) ? res.data.date_groups : [];
+  let date_groups: FolderDateGroup[] = [];
+  let photos: Photo[] = [];
+
+  if (rawDateGroups.length > 0) {
+    date_groups = rawDateGroups.map((dg: any) => ({
+      date: dg.date || 'Unknown Date',
+      count: dg.count || (Array.isArray(dg.photos) ? dg.photos.length : 0),
+      photos: Array.isArray(dg.photos) ? dg.photos : []
+    }));
+    photos = date_groups.flatMap(g => g.photos);
+  } else {
+    photos = Array.isArray(res?.data?.photos) ? res.data.photos : [];
+    const groupMap = new Map<string, Photo[]>();
+    photos.forEach(p => {
+      const dateKey = p.taken_at ? p.taken_at.split('T')[0] : 'Unknown Date';
+      if (!groupMap.has(dateKey)) groupMap.set(dateKey, []);
+      groupMap.get(dateKey)!.push(p);
+    });
+    date_groups = Array.from(groupMap.entries()).map(([date, groupPhotos]) => ({
+      date,
+      count: groupPhotos.length,
+      photos: groupPhotos
+    }));
+  }
 
   const pag = res?.pagination || {};
   const page = pag.page || defaultPage;
@@ -207,6 +234,7 @@ export function normalizeFolderContents(res: any, defaultPath = '', defaultPage 
     current_folder,
     parent_folder,
     sub_folders,
+    date_groups,
     photos,
     page,
     limit,
@@ -260,10 +288,25 @@ function getMockFolderContents(folderPath: string, page = 1, limit = 50): Folder
 
   const pag = getMockPaginatedPhotos(matchingPhotos, page, limit);
 
+  // Group items into date_groups
+  const groupMap = new Map<string, Photo[]>();
+  pag.items.forEach(p => {
+    const dateKey = p.taken_at ? p.taken_at.split('T')[0] : 'Unknown Date';
+    if (!groupMap.has(dateKey)) groupMap.set(dateKey, []);
+    groupMap.get(dateKey)!.push(p);
+  });
+
+  const date_groups: FolderDateGroup[] = Array.from(groupMap.entries()).map(([date, items]) => ({
+    date,
+    count: items.length,
+    photos: items
+  }));
+
   return {
     current_folder: target,
     parent_folder: parent,
     sub_folders,
+    date_groups,
     photos: pag.items,
     page: pag.page,
     limit: pag.limit,

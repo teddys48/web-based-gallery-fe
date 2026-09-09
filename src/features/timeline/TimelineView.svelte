@@ -5,11 +5,35 @@
   import EmptyState from '$lib/components/common/EmptyState.svelte';
   import ErrorBanner from '$lib/components/common/ErrorBanner.svelte';
   import { activeBucketFilterStore, lightboxStore } from '$lib/stores/uiStore';
-  import { Calendar, Filter, X } from 'lucide-svelte';
+  import { Calendar, Filter, X, ChevronRight, ChevronsUpDown } from 'lucide-svelte';
   import type { Photo, PaginatedResponse } from '$lib/types/photo';
   import { format, parseISO, isToday, isYesterday } from 'date-fns';
+  import { slide } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
 
   const filter = $derived($activeBucketFilterStore);
+
+  // State for collapsible date groups
+  let collapsedDates = $state<Record<string, boolean>>({});
+
+  function toggleDateGroup(dateKey: string) {
+    collapsedDates[dateKey] = !collapsedDates[dateKey];
+  }
+
+  function collapseAllDates() {
+    const next: Record<string, boolean> = {};
+    groupedPhotos.forEach(g => { next[g.dateKey] = true; });
+    collapsedDates = next;
+  }
+
+  function expandAllDates() {
+    collapsedDates = {};
+  }
+
+  const isAllCollapsed = $derived.by(() => {
+    if (!groupedPhotos.length) return false;
+    return groupedPhotos.every(g => collapsedDates[g.dateKey]);
+  });
 
   // TanStack Query Infinite Query for Timeline
   const query = createInfiniteQuery<PaginatedResponse<Photo>>({
@@ -133,20 +157,34 @@
       </p>
     </div>
 
-    {#if filter}
-      <div class="flex items-center gap-2 rounded-xl bg-primary/10 border border-primary/20 px-3 py-1.5 text-xs text-primary animate-fade-in">
-        <Filter class="h-3.5 w-3.5" />
-        <span class="font-medium">Filter: {filter.year}{filter.month ? ` / Month ${filter.month}` : ''}</span>
+    <div class="flex items-center gap-2">
+      {#if groupedPhotos.length > 0}
         <button
           type="button"
-          onclick={clearFilter}
-          aria-label="Clear filter"
-          class="rounded-md p-0.5 hover:bg-primary/20 transition-all"
+          onclick={() => isAllCollapsed ? expandAllDates() : collapseAllDates()}
+          class="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-card px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-all shadow-sm"
+          title={isAllCollapsed ? "Expand all date groups" : "Collapse all date groups"}
         >
-          <X class="h-3.5 w-3.5" />
+          <ChevronsUpDown class="h-3.5 w-3.5 text-primary" />
+          <span>{isAllCollapsed ? "Expand All" : "Collapse All"}</span>
         </button>
-      </div>
-    {/if}
+      {/if}
+
+      {#if filter}
+        <div class="flex items-center gap-2 rounded-xl bg-primary/10 border border-primary/20 px-3 py-1.5 text-xs text-primary animate-fade-in">
+          <Filter class="h-3.5 w-3.5" />
+          <span class="font-medium">Filter: {filter.year}{filter.month ? ` / Month ${filter.month}` : ''}</span>
+          <button
+            type="button"
+            onclick={clearFilter}
+            aria-label="Clear filter"
+            class="rounded-md p-0.5 hover:bg-primary/20 transition-all"
+          >
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </div>
+      {/if}
+    </div>
   </div>
 
   <!-- Loading State -->
@@ -177,30 +215,47 @@
   {:else}
     <div class="flex-1 overflow-y-auto min-h-0 pr-1 space-y-6">
       {#each groupedPhotos as group (group.dateKey)}
+        {@const isCollapsed = collapsedDates[group.dateKey] ?? false}
         <div class="space-y-3">
-          <!-- Date Header Banner -->
-          <div class="sticky top-0 z-10 flex items-center justify-between rounded-xl bg-background/90 backdrop-blur-md px-3.5 py-2 border border-border/50 shadow-sm">
+          <!-- Interactive Collapsible Date Header Banner -->
+          <button
+            type="button"
+            onclick={() => toggleDateGroup(group.dateKey)}
+            class="sticky top-0 z-20 flex w-full items-center justify-between rounded-xl bg-background/95 backdrop-blur-md px-3.5 py-2 border border-border/50 shadow-sm hover:bg-accent/50 active:bg-accent/80 transition-colors cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background select-none group"
+          >
             <div class="flex items-center gap-2">
-              <Calendar class="h-4 w-4 text-primary" />
+              <ChevronRight class={`h-4 w-4 text-primary shrink-0 transition-transform duration-300 ${isCollapsed ? 'rotate-0' : 'rotate-90'}`} />
+              <Calendar class="h-4 w-4 text-primary/80 shrink-0" />
               <h3 class="text-xs sm:text-sm font-bold text-foreground capitalize">
                 {group.displayDate}
               </h3>
             </div>
 
-            <span class="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground font-semibold">
-              {group.photos.length} items
-            </span>
-          </div>
+            <div class="flex items-center gap-2">
+              {#if isCollapsed}
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full animate-fade-in">
+                  Collapsed
+                </span>
+              {/if}
+              <span class="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground font-semibold">
+                {group.photos.length} items
+              </span>
+            </div>
+          </button>
 
-          <!-- Photo Grid for Date Group -->
-          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-4 px-0.5">
-            {#each group.photos as item (item.photo.id)}
-              <PhotoCard
-                photo={item.photo}
-                onClick={() => handlePhotoClick(item.photo, item.globalIndex)}
-              />
-            {/each}
-          </div>
+          <!-- Smooth Sliding Photo Grid for Date Group -->
+          {#if !isCollapsed}
+            <div transition:slide={{ duration: 250, easing: cubicOut }} class="pt-1">
+              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-4 px-0.5">
+                {#each group.photos as item (item.photo.id)}
+                  <PhotoCard
+                    photo={item.photo}
+                    onClick={() => handlePhotoClick(item.photo, item.globalIndex)}
+                  />
+                {/each}
+              </div>
+            </div>
+          {/if}
         </div>
       {/each}
 

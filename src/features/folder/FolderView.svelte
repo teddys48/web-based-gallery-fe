@@ -1,14 +1,39 @@
 <script lang="ts">
   import { createInfiniteQuery } from '@tanstack/svelte-query';
   import { getFolderContents, getFolderThumbnailUrl } from '$lib/api/client';
-  import VirtualizedGrid from '$features/grid/VirtualizedGrid.svelte';
+  import PhotoCard from '$features/grid/PhotoCard.svelte';
   import EmptyState from '$lib/components/common/EmptyState.svelte';
   import ErrorBanner from '$lib/components/common/ErrorBanner.svelte';
-  import { selectedFolderPathStore } from '$lib/stores/uiStore';
-  import { Folder, FolderOpen, ChevronRight, Home, ArrowLeft } from 'lucide-svelte';
+  import { selectedFolderPathStore, lightboxStore } from '$lib/stores/uiStore';
+  import { Folder, FolderOpen, ChevronRight, Home, ArrowLeft, Calendar, ChevronsUpDown } from 'lucide-svelte';
   import type { FolderContentsResponse, SubFolderNode, Photo } from '$lib/types/photo';
+  import { format, parseISO, isToday, isYesterday } from 'date-fns';
+  import { slide } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
 
   const folderPath = $derived($selectedFolderPathStore);
+
+  // State for collapsible date groups
+  let collapsedDates = $state<Record<string, boolean>>({});
+
+  function toggleDateGroup(dateKey: string) {
+    collapsedDates[dateKey] = !collapsedDates[dateKey];
+  }
+
+  function collapseAllDates() {
+    const next: Record<string, boolean> = {};
+    groupedPhotos.forEach(g => { next[g.dateKey] = true; });
+    collapsedDates = next;
+  }
+
+  function expandAllDates() {
+    collapsedDates = {};
+  }
+
+  const isAllCollapsed = $derived.by(() => {
+    if (!groupedPhotos.length) return false;
+    return groupedPhotos.every(g => collapsedDates[g.dateKey]);
+  });
 
   // TanStack Query for /api/v1/folders/contents
   const query = createInfiniteQuery<FolderContentsResponse>({
@@ -46,10 +71,76 @@
     return $query.data.pages[0].sub_folders || [];
   });
 
-  // Extract photos across all paginated pages
-  const photos = $derived.by(() => {
+  // Extract all photos across all paginated pages for lightbox
+  const allPhotos = $derived.by(() => {
     if (!$query.data || !Array.isArray($query.data.pages)) return [];
-    return $query.data.pages.flatMap((p) => Array.isArray(p?.photos) ? p.photos : []);
+    return $query.data.pages.flatMap((p) => {
+      if (Array.isArray(p?.photos) && p.photos.length > 0) return p.photos;
+      if (Array.isArray(p?.date_groups)) return p.date_groups.flatMap((dg) => dg.photos || []);
+      return [];
+    });
+  });
+
+  // Consolidate date_groups across paginated response pages
+  interface DisplayDateGroup {
+    dateKey: string;
+    displayDate: string;
+    photos: { photo: Photo; globalIndex: number }[];
+  }
+
+  const groupedPhotos = $derived.by(() => {
+    const map = new Map<string, { photo: Photo; globalIndex: number }[]>();
+    let currentIndex = 0;
+
+    if ($query.data && Array.isArray($query.data.pages)) {
+      $query.data.pages.forEach((page) => {
+        if (Array.isArray(page.date_groups) && page.date_groups.length > 0) {
+          page.date_groups.forEach((dg) => {
+            const dateKey = dg.date || 'Unknown Date';
+            if (!map.has(dateKey)) map.set(dateKey, []);
+            (dg.photos || []).forEach((photo) => {
+              map.get(dateKey)!.push({ photo, globalIndex: currentIndex++ });
+            });
+          });
+        } else if (Array.isArray(page.photos) && page.photos.length > 0) {
+          page.photos.forEach((photo) => {
+            let dateKey = 'Unknown Date';
+            if (photo.taken_at) {
+              dateKey = photo.taken_at.split('T')[0];
+            }
+            if (!map.has(dateKey)) map.set(dateKey, []);
+            map.get(dateKey)!.push({ photo, globalIndex: currentIndex++ });
+          });
+        }
+      });
+    }
+
+    const groups: DisplayDateGroup[] = [];
+    for (const [dateKey, items] of map.entries()) {
+      let displayDate = dateKey;
+      if (dateKey !== 'Unknown Date') {
+        try {
+          const parsed = parseISO(dateKey);
+          if (isToday(parsed)) {
+            displayDate = 'Today';
+          } else if (isYesterday(parsed)) {
+            displayDate = 'Yesterday';
+          } else {
+            displayDate = format(parsed, 'EEEE, MMMM d, yyyy');
+          }
+        } catch {
+          displayDate = dateKey;
+        }
+      }
+
+      groups.push({
+        dateKey,
+        displayDate,
+        photos: items
+      });
+    }
+
+    return groups;
   });
 
   // Parent folder path from response
@@ -78,9 +169,32 @@
     }
   }
 
+  function handlePhotoClick(photo: Photo, globalIndex: number) {
+    lightboxStore.open(allPhotos, globalIndex);
+  }
+
   const currentFolderTitle = $derived(
     breadcrumbs.length > 0 ? breadcrumbs[breadcrumbs.length - 1].name : 'Root'
   );
+
+  // Infinite Scroll Trigger Element
+  let loadMoreRef = $state<HTMLDivElement | null>(null);
+
+  $effect(() => {
+    if (!loadMoreRef || !$query.hasNextPage || $query.isFetchingNextPage) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && $query.hasNextPage && !$query.isFetchingNextPage) {
+          $query.fetchNextPage();
+        }
+      },
+      { rootMargin: '300px' }
+    );
+
+    observer.observe(loadMoreRef);
+    return () => observer.disconnect();
+  });
 </script>
 
 <div class="flex flex-col flex-1 min-h-0 w-full overflow-hidden">
@@ -126,6 +240,18 @@
         </button>
       {/each}
     </nav>
+
+    {#if groupedPhotos.length > 0}
+      <button
+        type="button"
+        onclick={() => isAllCollapsed ? expandAllDates() : collapseAllDates()}
+        class="inline-flex items-center gap-1.5 rounded-xl border border-border/60 bg-card px-3 py-2.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-all shadow-sm shrink-0"
+        title={isAllCollapsed ? "Expand all date groups" : "Collapse all date groups"}
+      >
+        <ChevronsUpDown class="h-3.5 w-3.5 text-primary" />
+        <span class="hidden sm:inline">{isAllCollapsed ? "Expand All" : "Collapse All"}</span>
+      </button>
+    {/if}
   </div>
 
   <!-- Internal Single Scroll Container -->
@@ -201,21 +327,75 @@
         onRetry={() => $query.refetch()}
       />
 
-    <!-- Photos Grid & Empty State -->
+    <!-- Date Grouped Media View & Empty State -->
     {:else}
-      {#if photos.length > 0}
-        <div>
+      {#if groupedPhotos.length > 0}
+        <div class="space-y-6">
           <div class="mb-3 px-1">
-            <h3 class="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Direct Media in {currentFolderTitle} ({photos.length})
+            <h3 class="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Calendar class="h-3.5 w-3.5 text-primary" />
+              <span>Media in {currentFolderTitle} ({allPhotos.length})</span>
             </h3>
           </div>
-          <VirtualizedGrid
-            {photos}
-            hasNextPage={$query.hasNextPage}
-            isFetchingNextPage={$query.isFetchingNextPage}
-            onLoadMore={() => $query.fetchNextPage()}
-          />
+
+          {#each groupedPhotos as group (group.dateKey)}
+            {@const isCollapsed = collapsedDates[group.dateKey] ?? false}
+            <div class="space-y-3">
+              <!-- Interactive Collapsible Date Header Banner -->
+              <button
+                type="button"
+                onclick={() => toggleDateGroup(group.dateKey)}
+                class="sticky top-0 z-20 flex w-full items-center justify-between rounded-xl bg-background/95 backdrop-blur-md px-3.5 py-2 border border-border/50 shadow-sm hover:bg-accent/50 active:bg-accent/80 transition-colors cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background select-none group"
+              >
+                <div class="flex items-center gap-2">
+                  <ChevronRight class={`h-4 w-4 text-primary shrink-0 transition-transform duration-300 ${isCollapsed ? 'rotate-0' : 'rotate-90'}`} />
+                  <Calendar class="h-4 w-4 text-primary/80 shrink-0" />
+                  <h4 class="text-xs sm:text-sm font-bold text-foreground capitalize">
+                    {group.displayDate}
+                  </h4>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  {#if isCollapsed}
+                    <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full animate-fade-in">
+                      Collapsed
+                    </span>
+                  {/if}
+                  <span class="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground font-semibold">
+                    {group.photos.length} items
+                  </span>
+                </div>
+              </button>
+
+              <!-- Smooth Sliding Photo Grid for Date Group -->
+              {#if !isCollapsed}
+                <div transition:slide={{ duration: 250, easing: cubicOut }} class="pt-1">
+                  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-4 px-0.5">
+                    {#each group.photos as item (item.photo.id)}
+                      <PhotoCard
+                        photo={item.photo}
+                        onClick={() => handlePhotoClick(item.photo, item.globalIndex)}
+                      />
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/each}
+
+          <!-- Infinite Scroll Trigger Element -->
+          <div bind:this={loadMoreRef} class="w-full flex items-center justify-center py-6 my-4 border-t border-border/30">
+            {#if $query.isFetchingNextPage}
+              <div class="flex items-center gap-2 text-xs text-muted-foreground animate-pulse">
+                <div class="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin"></div>
+                <span>Loading more items...</span>
+              </div>
+            {:else if !$query.hasNextPage && allPhotos.length > 0}
+              <p class="text-xs text-muted-foreground font-semibold tracking-wide">
+                All folder items loaded ({allPhotos.length})
+              </p>
+            {/if}
+          </div>
         </div>
       {:else if subfolders.length === 0}
         <EmptyState

@@ -36,6 +36,7 @@ export interface SubFolderNode {
   path: string;
   photo_count: number;
   thumbnail_path?: string;
+  thumbnail_url?: string;
   cover_photo_id?: number;
 }
 
@@ -44,15 +45,23 @@ export interface FolderNode {
   path: string;
   photo_count: number;
   thumbnail_path?: string;
+  thumbnail_url?: string;
   cover_photo_id?: number;
   sub_folders?: FolderNode[];
   children?: FolderNode[];
+}
+
+export interface FolderDateGroup {
+  date: string;
+  count: number;
+  photos: Photo[];
 }
 
 export interface FolderContentsData {
   current_folder: string;
   parent_folder?: string;
   sub_folders: SubFolderNode[];
+  date_groups?: FolderDateGroup[];
   photos: Photo[];
 }
 
@@ -60,6 +69,7 @@ export interface FolderContentsResponse {
   current_folder: string;
   parent_folder?: string;
   sub_folders: SubFolderNode[];
+  date_groups?: FolderDateGroup[];
   photos: Photo[];
   page: number;
   limit: number;
