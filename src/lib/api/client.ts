@@ -1,4 +1,4 @@
-import type { Photo, TimelineBucket, FolderNode, ScanStatus, PaginatedResponse, FolderContentsResponse, SubFolderNode, FolderDateGroup } from '../types/photo';
+import type { Photo, TimelineBucket, FolderNode, ScanStatus, PaginatedResponse, FolderContentsResponse, SubFolderNode, FolderDateGroup, ByDateParams } from '../types/photo';
 import { MOCK_PHOTOS_LIST, MOCK_TIMELINE_BUCKETS, MOCK_FOLDER_TREE, getMockPaginatedPhotos, SAMPLE_FALLBACK_IMAGES } from './mockData';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -33,25 +33,47 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
   }
 }
 
-export function getThumbnailUrl(photo: Photo): string {
+export function getThumbnailUrl(photo: Photo | null | undefined): string {
   if (!photo) return SAMPLE_FALLBACK_IMAGES[0];
-  if (photo.thumbnail_path && photo.thumbnail_path.startsWith('http')) {
-    return photo.thumbnail_path;
+
+  // 1. If explicit thumbnail_url provided
+  if (photo.thumbnail_url) {
+    if (photo.thumbnail_url.startsWith('http')) return photo.thumbnail_url;
+    return photo.thumbnail_url.startsWith('/') ? `${BASE_URL}${photo.thumbnail_url}` : `${BASE_URL}/${photo.thumbnail_url}`;
   }
+
+  // 2. Stream Thumbnail by Photo ID (Endpoint A: GET /api/v1/photos/:id/thumbnail) - Auto-Generate On-Demand
   if (isBackendAvailable && photo.id) {
     return `${BASE_URL}/api/v1/photos/${photo.id}/thumbnail`;
   }
+
+  // 3. Stream Thumbnail by Media Path (Endpoint B: GET /api/v1/thumbnails?path={filePath})
+  const targetPath = photo.file_path || photo.thumbnail_path;
+  if (isBackendAvailable && targetPath) {
+    if (targetPath.startsWith('http')) return targetPath;
+    if (targetPath.startsWith('/api/')) return targetPath.startsWith('/') ? `${BASE_URL}${targetPath}` : `${BASE_URL}/${targetPath}`;
+    return `${BASE_URL}/api/v1/thumbnails?path=${encodeURIComponent(targetPath)}`;
+  }
+
   const idx = Math.abs(photo.id || 1) % SAMPLE_FALLBACK_IMAGES.length;
   return SAMPLE_FALLBACK_IMAGES[idx];
 }
 
-export function getRawImageUrl(photo: Photo): string {
+export function getThumbnailByPath(filePath: string): string {
+  if (!filePath) return SAMPLE_FALLBACK_IMAGES[0];
+  if (filePath.startsWith('http')) return filePath;
+  if (filePath.startsWith('/api/')) return filePath.startsWith('/') ? `${BASE_URL}${filePath}` : `${BASE_URL}/${filePath}`;
+  return `${BASE_URL}/api/v1/thumbnails?path=${encodeURIComponent(filePath)}`;
+}
+
+export function getRawImageUrl(photo: Photo | null | undefined): string {
   if (!photo) return SAMPLE_FALLBACK_IMAGES[0];
-  if (photo.thumbnail_path && photo.thumbnail_path.startsWith('http')) {
-    return photo.thumbnail_path;
-  }
   if (isBackendAvailable && photo.id) {
     return `${BASE_URL}/api/v1/photos/${photo.id}/raw`;
+  }
+  if (photo.file_path) {
+    if (photo.file_path.startsWith('http')) return photo.file_path;
+    return photo.file_path.startsWith('/') ? `${BASE_URL}${photo.file_path}` : `${BASE_URL}/${photo.file_path}`;
   }
   const idx = Math.abs(photo.id || 1) % SAMPLE_FALLBACK_IMAGES.length;
   return SAMPLE_FALLBACK_IMAGES[idx];
@@ -59,12 +81,26 @@ export function getRawImageUrl(photo: Photo): string {
 
 export function getFolderThumbnailUrl(folder: FolderNode | SubFolderNode): string {
   if (!folder) return SAMPLE_FALLBACK_IMAGES[0];
-  if (folder.thumbnail_path && folder.thumbnail_path.startsWith('http')) {
-    return folder.thumbnail_path;
+
+  // 1. Explicit thumbnail_url from folder payload
+  if (folder.thumbnail_url) {
+    if (folder.thumbnail_url.startsWith('http')) return folder.thumbnail_url;
+    return folder.thumbnail_url.startsWith('/') ? `${BASE_URL}${folder.thumbnail_url}` : `${BASE_URL}/${folder.thumbnail_url}`;
   }
+
+  // 2. Cover Photo ID (Endpoint A)
   if (folder.cover_photo_id && isBackendAvailable) {
     return `${BASE_URL}/api/v1/photos/${folder.cover_photo_id}/thumbnail`;
   }
+
+  // 3. Stream Thumbnail by Folder Path (Endpoint B)
+  const targetPath = folder.path || folder.thumbnail_path;
+  if (isBackendAvailable && targetPath) {
+    if (targetPath.startsWith('http')) return targetPath;
+    if (targetPath.startsWith('/api/')) return targetPath.startsWith('/') ? `${BASE_URL}${targetPath}` : `${BASE_URL}/${targetPath}`;
+    return `${BASE_URL}/api/v1/thumbnails?path=${encodeURIComponent(targetPath)}`;
+  }
+
   let hash = 0;
   const p = folder.path || folder.name || 'folder';
   for (let i = 0; i < p.length; i++) {
@@ -333,6 +369,83 @@ export async function getTimelineBuckets(): Promise<TimelineBucket[]> {
     return normalizeArray<TimelineBucket>(raw, MOCK_TIMELINE_BUCKETS);
   } catch {
     return MOCK_TIMELINE_BUCKETS;
+  }
+}
+
+// Get Media by Date API: GET /api/v1/photos/by-date
+export async function getPhotosByDate(params: ByDateParams = {}): Promise<PaginatedResponse<Photo>> {
+  try {
+    const queryParts: string[] = [];
+    if (params.date) queryParts.push(`date=${encodeURIComponent(params.date)}`);
+    if (params.start_date) queryParts.push(`start_date=${encodeURIComponent(params.start_date)}`);
+    if (params.end_date) queryParts.push(`end_date=${encodeURIComponent(params.end_date)}`);
+    if (params.year !== undefined && params.year !== null) queryParts.push(`year=${params.year}`);
+    if (params.month !== undefined && params.month !== null) queryParts.push(`month=${params.month}`);
+    if (params.media_type) queryParts.push(`media_type=${encodeURIComponent(params.media_type)}`);
+    const page = params.page || 1;
+    const limit = params.limit || 50;
+    queryParts.push(`page=${page}`);
+    queryParts.push(`limit=${limit}`);
+
+    const queryString = queryParts.length ? `?${queryParts.join('&')}` : '';
+    const raw = await fetchApi<any>(`/api/v1/photos/by-date${queryString}`);
+    return normalizePaginatedPhotos(raw, page, limit);
+  } catch {
+    // Mock fallback: filter MOCK_PHOTOS_LIST by parameters
+    let filtered = [...MOCK_PHOTOS_LIST];
+    if (params.date) {
+      filtered = filtered.filter(p => {
+        if (!p.taken_at) return false;
+        const dStr = p.taken_at.split('T')[0];
+        return params.date!.length === 7 ? dStr.startsWith(params.date!) : dStr === params.date;
+      });
+    }
+    if (params.start_date) {
+      filtered = filtered.filter(p => p.taken_at && p.taken_at.split('T')[0] >= params.start_date!);
+    }
+    if (params.end_date) {
+      filtered = filtered.filter(p => p.taken_at && p.taken_at.split('T')[0] <= params.end_date!);
+    }
+    if (params.year !== undefined && params.year !== null) {
+      filtered = filtered.filter(p => p.taken_at && new Date(p.taken_at).getFullYear() === params.year);
+    }
+    if (params.month !== undefined && params.month !== null) {
+      filtered = filtered.filter(p => p.taken_at && (new Date(p.taken_at).getMonth() + 1) === params.month);
+    }
+    if (params.media_type) {
+      filtered = filtered.filter(p => isVideoMedia(p) ? params.media_type === 'video' : params.media_type === 'image');
+    }
+    return getMockPaginatedPhotos(filtered, params.page || 1, params.limit || 50);
+  }
+}
+
+// Get Media by Date Grouped API: GET /api/v1/photos/by-date/grouped
+export async function getPhotosByDateGrouped(params: ByDateParams = {}): Promise<FolderDateGroup[]> {
+  try {
+    const queryParts: string[] = [];
+    if (params.date) queryParts.push(`date=${encodeURIComponent(params.date)}`);
+    if (params.start_date) queryParts.push(`start_date=${encodeURIComponent(params.start_date)}`);
+    if (params.end_date) queryParts.push(`end_date=${encodeURIComponent(params.end_date)}`);
+    if (params.year !== undefined && params.year !== null) queryParts.push(`year=${params.year}`);
+    if (params.month !== undefined && params.month !== null) queryParts.push(`month=${params.month}`);
+    if (params.media_type) queryParts.push(`media_type=${encodeURIComponent(params.media_type)}`);
+
+    const queryString = queryParts.length ? `?${queryParts.join('&')}` : '';
+    const raw = await fetchApi<any>(`/api/v1/photos/by-date/grouped${queryString}`);
+    return normalizeArray<FolderDateGroup>(raw, []);
+  } catch {
+    const pag = await getPhotosByDate(params);
+    const map = new Map<string, Photo[]>();
+    pag.items.forEach(p => {
+      const dKey = p.taken_at ? p.taken_at.split('T')[0] : 'Unknown Date';
+      if (!map.has(dKey)) map.set(dKey, []);
+      map.get(dKey)!.push(p);
+    });
+    return Array.from(map.entries()).map(([date, photos]) => ({
+      date,
+      count: photos.length,
+      photos
+    }));
   }
 }
 

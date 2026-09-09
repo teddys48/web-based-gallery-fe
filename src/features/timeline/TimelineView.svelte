@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createInfiniteQuery } from '@tanstack/svelte-query';
-  import { getTimelinePhotos } from '$lib/api/client';
+  import { getTimelinePhotos, getPhotosByDate, isVideoMedia } from '$lib/api/client';
   import PhotoCard from '$features/grid/PhotoCard.svelte';
   import EmptyState from '$lib/components/common/EmptyState.svelte';
   import ErrorBanner from '$lib/components/common/ErrorBanner.svelte';
@@ -12,6 +12,11 @@
   import { cubicOut } from 'svelte/easing';
 
   const filter = $derived($activeBucketFilterStore);
+
+  const MONTH_NAMES = [
+    '', 'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
 
   // State for collapsible date groups
   let collapsedDates = $state<Record<string, boolean>>({});
@@ -35,30 +40,121 @@
     return groupedPhotos.every(g => collapsedDates[g.dateKey]);
   });
 
-  // TanStack Query Infinite Query for Timeline
-  const query = createInfiniteQuery<PaginatedResponse<Photo>>({
+  // Main TanStack Query Infinite Query for Timeline
+  const mainTimelineQuery = createInfiniteQuery<PaginatedResponse<Photo>>({
     queryKey: ['photos', 'timeline'],
     queryFn: ({ pageParam = 1 }) => getTimelinePhotos(pageParam as number, 50),
     getNextPageParam: (lastPage: PaginatedResponse<Photo>) => lastPage.has_next ? (lastPage.page + 1) : undefined,
     initialPageParam: 1
   });
 
-  // Flatten all page photo items safely
-  const allPhotos = $derived.by(() => {
-    if (!$query.data || !Array.isArray($query.data.pages)) return [];
-    return $query.data.pages.flatMap((page) => (page && Array.isArray(page.items)) ? page.items : []);
+  // Flatten main timeline page items
+  const mainTimelinePhotos = $derived.by(() => {
+    if (!$mainTimelineQuery.data || !Array.isArray($mainTimelineQuery.data.pages)) return [];
+    return $mainTimelineQuery.data.pages.flatMap((page) => (page && Array.isArray(page.items)) ? page.items : []);
   });
 
-  // Filter photos by active bucket if selected
-  const filteredPhotos = $derived.by(() => {
-    if (!filter) return allPhotos;
-    return allPhotos.filter((photo) => {
+  // Check if active filter can be fully satisfied from already fetched main timeline photos
+  const isSatisfiedByMainTimeline = $derived.by(() => {
+    if (!filter) return false;
+    const matched = mainTimelinePhotos.filter(photo => {
       if (!photo?.taken_at) return false;
+      const dStr = photo.taken_at.split('T')[0];
+      if (filter.date) {
+        if (filter.date.length === 7 ? !dStr.startsWith(filter.date) : dStr !== filter.date) return false;
+      }
+      if (filter.start_date && dStr < filter.start_date) return false;
+      if (filter.end_date && dStr > filter.end_date) return false;
+      const dt = new Date(photo.taken_at);
+      if (filter.year !== undefined && dt.getFullYear() !== filter.year) return false;
+      if (filter.month !== undefined && (dt.getMonth() + 1) !== filter.month) return false;
+      if (filter.media_type) {
+        const isVid = isVideoMedia(photo);
+        if (filter.media_type === 'video' && !isVid) return false;
+        if (filter.media_type === 'image' && isVid) return false;
+      }
+      return true;
+    });
+
+    if (filter.expected_count !== undefined && filter.expected_count > 0 && matched.length >= filter.expected_count) {
+      return true;
+    }
+    if (!$mainTimelineQuery.hasNextPage && mainTimelinePhotos.length > 0) {
+      return true;
+    }
+    return false;
+  });
+
+  // Dedicated By-Date query when filter is active and not satisfied by main timeline
+  const byDateQuery = createInfiniteQuery<PaginatedResponse<Photo>>({
+    queryKey: ['photos', 'by-date', filter?.date ?? '', filter?.start_date ?? '', filter?.end_date ?? '', filter?.year ?? '', filter?.month ?? '', filter?.media_type ?? ''],
+    queryFn: ({ pageParam = 1 }) => {
+      if (!filter) {
+        return Promise.resolve({ items: [], page: 1, limit: 50, total: 0, total_pages: 1, has_next: false, has_prev: false });
+      }
+      return getPhotosByDate({
+        date: filter.date,
+        start_date: filter.start_date,
+        end_date: filter.end_date,
+        year: filter.year,
+        month: filter.month,
+        media_type: filter.media_type,
+        page: pageParam as number,
+        limit: 50
+      });
+    },
+    getNextPageParam: (lastPage: PaginatedResponse<Photo>) => lastPage.has_next ? (lastPage.page + 1) : undefined,
+    initialPageParam: 1,
+    enabled: Boolean(filter && !isSatisfiedByMainTimeline)
+  });
+
+  const byDatePhotos = $derived.by(() => {
+    if (!$byDateQuery.data || !Array.isArray($byDateQuery.data.pages)) return [];
+    return $byDateQuery.data.pages.flatMap((page) => (page && Array.isArray(page.items)) ? page.items : []);
+  });
+
+  // Active query pointer (evaluates to result of either $byDateQuery or $mainTimelineQuery)
+  const activeQuery = $derived.by(() => {
+    if (filter && !isSatisfiedByMainTimeline) {
+      return $byDateQuery;
+    }
+    return $mainTimelineQuery;
+  });
+
+  // Active photos list
+  const filteredPhotos = $derived.by(() => {
+    if (!filter) return mainTimelinePhotos;
+    if (!isSatisfiedByMainTimeline && byDatePhotos.length > 0) {
+      return byDatePhotos;
+    }
+    return mainTimelinePhotos.filter((photo) => {
+      if (!photo?.taken_at) return false;
+      const dStr = photo.taken_at.split('T')[0];
+      if (filter.date) {
+        if (filter.date.length === 7 ? !dStr.startsWith(filter.date) : dStr !== filter.date) return false;
+      }
+      if (filter.start_date && dStr < filter.start_date) return false;
+      if (filter.end_date && dStr > filter.end_date) return false;
       const date = new Date(photo.taken_at);
-      const matchYear = date.getFullYear() === filter.year;
-      const matchMonth = filter.month ? (date.getMonth() + 1) === filter.month : true;
+      const matchYear = filter.year !== undefined ? date.getFullYear() === filter.year : true;
+      const matchMonth = filter.month !== undefined ? (date.getMonth() + 1) === filter.month : true;
+      if (filter.media_type) {
+        const isVid = isVideoMedia(photo);
+        if (filter.media_type === 'video' && !isVid) return false;
+        if (filter.media_type === 'image' && isVid) return false;
+      }
       return matchYear && matchMonth;
     });
+  });
+
+  // Filter tag text for UI
+  const filterLabel = $derived.by(() => {
+    if (!filter) return '';
+    if (filter.date) return `Date: ${filter.date}`;
+    if (filter.start_date || filter.end_date) return `Range: ${filter.start_date || ''} - ${filter.end_date || ''}`;
+    if (filter.year && filter.month) return `${MONTH_NAMES[filter.month]} ${filter.year}`;
+    if (filter.year) return `Year ${filter.year}`;
+    return 'Active Filter';
   });
 
   // Group photos by date
@@ -69,9 +165,9 @@
   }
 
   const groupedPhotos = $derived.by(() => {
-    const map = new Map<string, { photo: Photo; globalIndex: number }[]>();
+    const map = new Map<string, Photo[]>();
 
-    filteredPhotos.forEach((photo, index) => {
+    filteredPhotos.forEach((photo) => {
       let dateKey = 'Unknown Date';
       if (photo?.taken_at) {
         try {
@@ -84,9 +180,10 @@
       if (!map.has(dateKey)) {
         map.set(dateKey, []);
       }
-      map.get(dateKey)!.push({ photo, globalIndex: index });
+      map.get(dateKey)!.push(photo);
     });
 
+    let currentIndex = 0;
     const groups: DateGroup[] = [];
     for (const [dateKey, items] of map.entries()) {
       let displayDate = dateKey;
@@ -105,14 +202,20 @@
         }
       }
 
+      const indexedPhotos = items.map((photo) => ({ photo, globalIndex: currentIndex++ }));
+
       groups.push({
         dateKey,
         displayDate,
-        photos: items
+        photos: indexedPhotos
       });
     }
 
     return groups;
+  });
+
+  const displayPhotosList = $derived.by(() => {
+    return groupedPhotos.flatMap(g => g.photos.map(p => p.photo));
   });
 
   function clearFilter() {
@@ -120,19 +223,23 @@
   }
 
   function handlePhotoClick(photo: Photo, globalIndex: number) {
-    lightboxStore.open(filteredPhotos, globalIndex);
+    lightboxStore.open(displayPhotosList, globalIndex);
   }
 
   // IntersectionObserver for Infinite Scroll
   let loadMoreRef = $state<HTMLDivElement | null>(null);
 
   $effect(() => {
-    if (!loadMoreRef || !$query.hasNextPage || $query.isFetchingNextPage) return;
+    if (!loadMoreRef || !activeQuery.hasNextPage || activeQuery.isFetchingNextPage) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && $query.hasNextPage && !$query.isFetchingNextPage) {
-          $query.fetchNextPage();
+        if (entries[0].isIntersecting && activeQuery.hasNextPage && !activeQuery.isFetchingNextPage) {
+          if (filter && !isSatisfiedByMainTimeline) {
+            $byDateQuery.fetchNextPage();
+          } else {
+            $mainTimelineQuery.fetchNextPage();
+          }
         }
       },
       { rootMargin: '300px' }
@@ -173,7 +280,7 @@
       {#if filter}
         <div class="flex items-center gap-2 rounded-xl bg-primary/10 border border-primary/20 px-3 py-1.5 text-xs text-primary animate-fade-in">
           <Filter class="h-3.5 w-3.5" />
-          <span class="font-medium">Filter: {filter.year}{filter.month ? ` / Month ${filter.month}` : ''}</span>
+          <span class="font-medium">Filter: {filterLabel}</span>
           <button
             type="button"
             onclick={clearFilter}
@@ -188,7 +295,7 @@
   </div>
 
   <!-- Loading State -->
-  {#if $query.isLoading}
+  {#if activeQuery.isLoading}
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mt-4">
       {#each Array(15) as _, i}
         <div class="aspect-square w-full rounded-xl bg-muted/60 animate-pulse"></div>
@@ -196,10 +303,10 @@
     </div>
 
   <!-- Error State -->
-  {:else if $query.isError}
+  {:else if activeQuery.isError}
     <ErrorBanner
-      message={$query.error?.message || 'Error loading timeline photos'}
-      onRetry={() => $query.refetch()}
+      message={activeQuery.error?.message || 'Error loading timeline photos'}
+      onRetry={() => activeQuery.refetch()}
     />
 
   <!-- Empty State -->
@@ -261,12 +368,12 @@
 
       <!-- Infinite Scroll Trigger Element -->
       <div bind:this={loadMoreRef} class="h-12 w-full flex items-center justify-center my-4">
-        {#if $query.isFetchingNextPage}
+        {#if activeQuery.isFetchingNextPage}
           <div class="flex items-center gap-2 text-xs text-muted-foreground animate-pulse">
             <div class="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin"></div>
             <span>Loading more timeline media...</span>
           </div>
-        {:else if !$query.hasNextPage && filteredPhotos.length > 0}
+        {:else if !activeQuery.hasNextPage && filteredPhotos.length > 0}
           <p class="text-xs text-muted-foreground font-medium">All timeline media loaded ({filteredPhotos.length})</p>
         {/if}
       </div>

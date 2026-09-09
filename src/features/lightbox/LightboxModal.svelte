@@ -3,7 +3,8 @@
     lightboxStore,
     currentLightboxPhoto
   } from '$lib/stores/uiStore';
-  import { getRawImageUrl, isVideoMedia } from '$lib/api/client';
+  import { getRawImageUrl, getThumbnailUrl, isVideoMedia } from '$lib/api/client';
+  import { SAMPLE_FALLBACK_IMAGES } from '$lib/api/mockData';
   import {
     X,
     ChevronLeft,
@@ -37,6 +38,32 @@
   const totalPhotos = $derived($lightboxStore.photos.length);
 
   const isVideo = $derived(isVideoMedia(photo));
+
+  let imageFallbackStep = $state(0);
+
+  $effect(() => {
+    if (photo) {
+      imageFallbackStep = 0;
+    }
+  });
+
+  const rawSrc = $derived(getRawImageUrl(photo));
+  const thumbSrc = $derived(getThumbnailUrl(photo));
+
+  const currentMediaSrc = $derived.by(() => {
+    if (imageFallbackStep === 1) {
+      return thumbSrc;
+    }
+    if (imageFallbackStep >= 2) {
+      const idx = Math.abs(photo?.id || 1) % SAMPLE_FALLBACK_IMAGES.length;
+      return SAMPLE_FALLBACK_IMAGES[idx];
+    }
+    return rawSrc;
+  });
+
+  function handleMediaError() {
+    imageFallbackStep += 1;
+  }
 
   function resetZoom() {
     zoom = 1;
@@ -277,13 +304,15 @@
         ontouchend={handleTouchEnd}
       >
         {#if isVideo}
-          <!-- Video Player with HTTP Range Streaming Support -->
+          <!-- Video Player with HTTP Range Streaming Support & Thumbnail Poster -->
           <video
-            src={getRawImageUrl(photo)}
+            src={currentMediaSrc}
+            poster={thumbSrc}
             controls
             autoplay
             playsinline
             preload="metadata"
+            onerror={handleMediaError}
             class="max-h-full max-w-full object-contain rounded-xl shadow-2xl"
           >
             <track kind="captions" />
@@ -292,8 +321,9 @@
         {:else}
           <!-- Image Viewer -->
           <img
-            src={getRawImageUrl(photo)}
+            src={currentMediaSrc}
             alt={photo.file_name}
+            onerror={handleMediaError}
             style={`transform: scale(${zoom}) translate(${panX / zoom}px, ${panY / zoom}px); cursor: ${zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'};`}
             class="max-h-full max-w-full object-contain transition-transform duration-100 ease-out select-none shadow-2xl"
             draggable="false"

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Photo } from '$lib/types/photo';
-  import { getThumbnailUrl, isVideoMedia, formatDuration } from '$lib/api/client';
+  import { getThumbnailUrl, getThumbnailByPath, isVideoMedia, formatDuration } from '$lib/api/client';
   import { SAMPLE_FALLBACK_IMAGES } from '$lib/api/mockData';
   import { Camera, Calendar, Play } from 'lucide-svelte';
   import { format, parseISO } from 'date-fns';
@@ -12,12 +12,15 @@
 
   let { photo, onClick }: Props = $props();
 
-  let isFallback = $state(false);
+  let fallbackStep = $state(0);
 
   const thumbnailUrl = $derived(getThumbnailUrl(photo));
 
   const imageSrc = $derived.by(() => {
-    if (isFallback) {
+    if (fallbackStep === 1 && (photo?.file_path || photo?.thumbnail_path)) {
+      return getThumbnailByPath(photo.file_path || photo.thumbnail_path!);
+    }
+    if (fallbackStep >= 2 || (fallbackStep === 1 && !photo?.file_path && !photo?.thumbnail_path)) {
       const idx = Math.abs(photo?.id || 1) % SAMPLE_FALLBACK_IMAGES.length;
       return SAMPLE_FALLBACK_IMAGES[idx];
     }
@@ -25,7 +28,7 @@
   });
 
   function handleImageError() {
-    isFallback = true;
+    fallbackStep += 1;
   }
 
   const isVideo = $derived(isVideoMedia(photo));

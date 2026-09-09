@@ -20,6 +20,7 @@ export interface Photo {
   latitude?: number;
   longitude?: number;
   thumbnail_path?: string;
+  thumbnail_url?: string;
   mod_time?: string;
   created_at?: string;
   updated_at?: string;
@@ -29,6 +30,17 @@ export interface TimelineBucket {
   year: number;
   month: number; // 1-12
   count: number;
+}
+
+export interface ByDateParams {
+  date?: string; // YYYY-MM-DD or YYYY-MM
+  start_date?: string; // YYYY-MM-DD
+  end_date?: string; // YYYY-MM-DD
+  year?: number;
+  month?: number; // 1-12
+  media_type?: 'image' | 'video' | string;
+  page?: number;
+  limit?: number;
 }
 
 export interface SubFolderNode {

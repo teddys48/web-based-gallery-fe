@@ -169,8 +169,12 @@
     }
   }
 
+  const displayPhotosList = $derived.by(() => {
+    return groupedPhotos.flatMap(g => g.photos.map(p => p.photo));
+  });
+
   function handlePhotoClick(photo: Photo, globalIndex: number) {
-    lightboxStore.open(allPhotos, globalIndex);
+    lightboxStore.open(displayPhotosList, globalIndex);
   }
 
   const currentFolderTitle = $derived(

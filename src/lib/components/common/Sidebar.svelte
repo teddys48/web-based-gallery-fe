@@ -48,8 +48,8 @@
     mobileSidebarOpenStore.set(false);
   }
 
-  function selectBucket(year: number, month?: number) {
-    activeBucketFilterStore.set({ year, month });
+  function selectBucket(year: number, month?: number, count?: number) {
+    activeBucketFilterStore.set({ year, month, expected_count: count });
     activeViewStore.set('timeline');
     mobileSidebarOpenStore.set(false);
   }
@@ -230,7 +230,7 @@
             {@const isSelected = $activeBucketFilterStore?.year === bucket.year && $activeBucketFilterStore?.month === bucket.month}
             <button
               type="button"
-              onclick={() => selectBucket(bucket.year, bucket.month)}
+              onclick={() => selectBucket(bucket.year, bucket.month, bucket.count)}
               class={`flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
                 isSelected && $activeViewStore === 'timeline'
                   ? 'bg-primary text-primary-foreground font-semibold shadow-sm'
