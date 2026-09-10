@@ -27,7 +27,6 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # Proxy API requests to backend container or host
     location /api/ {
         proxy_pass http://gallery-be:8080;
         proxy_http_version 1.1;
@@ -36,6 +35,15 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Streaming large files / ZIP
+        proxy_buffering off;
+        proxy_request_buffering off;
+
+        # Large download / slow filesystem
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        send_timeout 1h;
     }
 }
 EOF
