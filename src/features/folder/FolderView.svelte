@@ -394,9 +394,9 @@
                 <div class="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin"></div>
                 <span>Loading more items...</span>
               </div>
-            {:else if !$query.hasNextPage && allPhotos.length > 0}
+            {:else if !$query.hasNextPage && displayPhotosList.length > 0}
               <p class="text-xs text-muted-foreground font-semibold tracking-wide">
-                All folder items loaded ({allPhotos.length})
+                All folder items loaded ({displayPhotosList.length})
               </p>
             {/if}
           </div>
