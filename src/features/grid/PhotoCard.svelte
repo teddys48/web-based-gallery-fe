@@ -13,6 +13,11 @@
   let { photo, onClick }: Props = $props();
 
   let fallbackStep = $state(0);
+  let isLoaded = $state(false);
+
+  function handleImageLoad() {
+    isLoaded = true;
+  }
 
   const thumbnailUrl = $derived(getThumbnailUrl(photo));
 
@@ -65,13 +70,19 @@
     </div>
   {/if}
 
-  <!-- Image / Thumbnail (Direct rendering without opacity-0 hiding) -->
+  <!-- Image Loading Skeleton Shimmer -->
+  {#if !isLoaded}
+    <div class="absolute inset-0 z-[1] bg-muted/60 animate-shimmer animate-pulse"></div>
+  {/if}
+
+  <!-- Image / Thumbnail -->
   <img
     src={imageSrc}
     alt={photo.file_name || 'Photo'}
     loading="lazy"
+    onload={handleImageLoad}
     onerror={handleImageError}
-    class="h-full w-full object-cover transition-all duration-300 group-hover:scale-105"
+    class={`h-full w-full object-cover transition-all duration-300 group-hover:scale-105 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
   />
 
   <!-- Hover Glass Overlay -->

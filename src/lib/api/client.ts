@@ -693,3 +693,60 @@ export async function getScanStatus(): Promise<ScanStatus> {
     };
   }
 }
+
+// Download Folder ZIP API: GET /api/v1/folders/download?path={folderPath}
+export async function downloadFolderZip(folderPath: string): Promise<void> {
+  const queryParam = folderPath ? `?path=${encodeURIComponent(folderPath)}` : '';
+  const url = `${BASE_URL}/api/v1/folders/download${queryParam}`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/zip, application/json, */*',
+      },
+    });
+
+    if (!res.ok) {
+      let errorMessage = `Failed to download ZIP (${res.status})`;
+      try {
+        const errJson = await res.json();
+        if (errJson && (errJson.message || errJson.error)) {
+          errorMessage = errJson.message || errJson.error;
+        }
+      } catch {
+        if (res.status === 400) errorMessage = 'Folder is empty or has no readable files.';
+        else if (res.status === 403) errorMessage = 'Path traversal attempt is forbidden.';
+        else if (res.status === 404) errorMessage = 'Folder was not found on disk.';
+      }
+      throw new Error(errorMessage);
+    }
+
+    // Extract filename from Content-Disposition header
+    let filename = '';
+    const disposition = res.headers.get('Content-Disposition');
+    if (disposition && disposition.includes('filename=')) {
+      const filenameMatch = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+      if (filenameMatch && filenameMatch[1]) {
+        filename = filenameMatch[1].replace(/['"]/g, '');
+      }
+    }
+    if (!filename) {
+      const folderName = folderPath ? folderPath.split('/').filter(Boolean).pop() : 'MEDIA_DIR';
+      filename = `${folderName || 'media'}.zip`;
+    }
+
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  } catch (err: any) {
+    console.error('[Download ZIP Error]', err);
+    throw err;
+  }
+}

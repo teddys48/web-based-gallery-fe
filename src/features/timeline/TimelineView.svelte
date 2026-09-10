@@ -5,6 +5,7 @@
   import PhotoCard from '$features/grid/PhotoCard.svelte';
   import EmptyState from '$lib/components/common/EmptyState.svelte';
   import ErrorBanner from '$lib/components/common/ErrorBanner.svelte';
+  import Skeleton from '$lib/components/common/Skeleton.svelte';
   import { activeBucketFilterStore, lightboxStore, type BucketFilter } from '$lib/stores/uiStore';
   import { Calendar, Filter, X, ChevronRight, ChevronsUpDown } from 'lucide-svelte';
   import type { Photo, PaginatedResponse } from '$lib/types/photo';
@@ -269,11 +270,7 @@
 
   <!-- Loading State -->
   {#if activeQuery.isLoading}
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mt-4">
-      {#each Array(15) as _, i}
-        <div class="aspect-square w-full rounded-xl bg-muted/60 animate-pulse"></div>
-      {/each}
-    </div>
+    <Skeleton type="timeline" count={12} />
 
   <!-- Error State -->
   {:else if activeQuery.isError}

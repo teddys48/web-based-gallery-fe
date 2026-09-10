@@ -22,6 +22,7 @@
   let rawFolderTree = $state<FolderNode[]>([]);
   let rawBuckets = $state<TimelineBucket[]>([]);
   let expandedFolders = $state<Record<string, boolean>>({});
+  let isLoadingSidebar = $state(true);
 
   const buckets = $derived(normalizeArray<TimelineBucket>(rawBuckets));
   const folderTree = $derived(normalizeArray<FolderNode>(rawFolderTree));
@@ -34,6 +35,8 @@
       rawFolderTree = fRes;
     } catch (e) {
       console.error('Sidebar load error', e);
+    } finally {
+      isLoadingSidebar = false;
     }
   });
 
@@ -225,26 +228,34 @@
           {/if}
         </div>
 
-        <div class="space-y-1">
-          {#each buckets as bucket (bucket.year + '-' + bucket.month)}
-            {@const isSelected = $activeBucketFilterStore?.year === bucket.year && $activeBucketFilterStore?.month === bucket.month}
-            <button
-              type="button"
-              onclick={() => selectBucket(bucket.year, bucket.month, bucket.count)}
-              class={`flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                isSelected && $activeViewStore === 'timeline'
-                  ? 'bg-primary text-primary-foreground font-semibold shadow-sm'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-              }`}
-            >
-              <div class="flex items-center gap-2">
-                <Calendar class="h-3.5 w-3.5 opacity-70" />
-                <span>{MONTH_NAMES[bucket.month]} {bucket.year}</span>
-              </div>
-              <span class="font-mono text-[10px] opacity-80">{bucket.count}</span>
-            </button>
-          {/each}
-        </div>
+        {#if isLoadingSidebar}
+          <div class="space-y-1.5 px-1">
+            {#each Array(4) as _}
+              <div class="h-7 w-full rounded-lg bg-muted/60 animate-shimmer animate-pulse"></div>
+            {/each}
+          </div>
+        {:else}
+          <div class="space-y-1">
+            {#each buckets as bucket (bucket.year + '-' + bucket.month)}
+              {@const isSelected = $activeBucketFilterStore?.year === bucket.year && $activeBucketFilterStore?.month === bucket.month}
+              <button
+                type="button"
+                onclick={() => selectBucket(bucket.year, bucket.month, bucket.count)}
+                class={`flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                  isSelected && $activeViewStore === 'timeline'
+                    ? 'bg-primary text-primary-foreground font-semibold shadow-sm'
+                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                }`}
+              >
+                <div class="flex items-center gap-2">
+                  <Calendar class="h-3.5 w-3.5 opacity-70" />
+                  <span>{MONTH_NAMES[bucket.month]} {bucket.year}</span>
+                </div>
+                <span class="font-mono text-[10px] opacity-80">{bucket.count}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <!-- Folder Tree Section -->
@@ -253,11 +264,19 @@
           <span class="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Folder Hierarchy</span>
         </div>
 
-        <div class="space-y-0.5">
-          {#each folderTree as rootNode, idx (rootNode.path || idx)}
-            {@render renderFolderItem(rootNode, 0)}
-          {/each}
-        </div>
+        {#if isLoadingSidebar}
+          <div class="space-y-1.5 px-1">
+            {#each Array(4) as _}
+              <div class="h-7 w-full rounded-lg bg-muted/60 animate-shimmer animate-pulse"></div>
+            {/each}
+          </div>
+        {:else}
+          <div class="space-y-0.5">
+            {#each folderTree as rootNode, idx (rootNode.path || idx)}
+              {@render renderFolderItem(rootNode, 0)}
+            {/each}
+          </div>
+        {/if}
       </div>
     </div>
 

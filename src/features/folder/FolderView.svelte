@@ -1,12 +1,13 @@
 <script lang="ts">
   import { createInfiniteQuery } from '@tanstack/svelte-query';
   import { derived } from 'svelte/store';
-  import { getFolderContents, getFolderThumbnailUrl } from '$lib/api/client';
+  import { getFolderContents, getFolderThumbnailUrl, downloadFolderZip } from '$lib/api/client';
   import PhotoCard from '$features/grid/PhotoCard.svelte';
   import EmptyState from '$lib/components/common/EmptyState.svelte';
   import ErrorBanner from '$lib/components/common/ErrorBanner.svelte';
+  import Skeleton from '$lib/components/common/Skeleton.svelte';
   import { selectedFolderPathStore, lightboxStore } from '$lib/stores/uiStore';
-  import { Folder, FolderOpen, ChevronRight, Home, ArrowLeft, Calendar, ChevronsUpDown } from 'lucide-svelte';
+  import { Folder, FolderOpen, ChevronRight, Home, ArrowLeft, Calendar, ChevronsUpDown, Download, X } from 'lucide-svelte';
   import type { FolderContentsResponse, SubFolderNode, Photo } from '$lib/types/photo';
   import { format, parseISO, isToday, isYesterday } from 'date-fns';
   import { slide } from 'svelte/transition';
@@ -177,6 +178,27 @@
     breadcrumbs.length > 0 ? breadcrumbs[breadcrumbs.length - 1].name : 'Root'
   );
 
+  let isDownloadingZip = $state(false);
+  let zipError = $state<string | null>(null);
+
+  async function handleDownloadZip() {
+    if (isDownloadingZip) return;
+    isDownloadingZip = true;
+    zipError = null;
+
+    try {
+      await downloadFolderZip(folderPath || '');
+    } catch (err: any) {
+      zipError = err?.message || 'Failed to download ZIP archive';
+    } finally {
+      isDownloadingZip = false;
+    }
+  }
+
+  function clearZipError() {
+    zipError = null;
+  }
+
   // Infinite Scroll Trigger Element
   let loadMoreRef = $state<HTMLDivElement | null>(null);
 
@@ -241,18 +263,47 @@
       {/each}
     </nav>
 
-    {#if groupedPhotos.length > 0}
+    <!-- Folder Action Buttons -->
+    <div class="flex items-center gap-2 shrink-0">
       <button
         type="button"
-        onclick={() => isAllCollapsed ? expandAllDates() : collapseAllDates()}
-        class="inline-flex items-center gap-1.5 rounded-xl border border-border/60 bg-card px-3 py-2.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-all shadow-sm shrink-0"
-        title={isAllCollapsed ? "Expand all date groups" : "Collapse all date groups"}
+        onclick={handleDownloadZip}
+        disabled={isDownloadingZip}
+        class="inline-flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 active:bg-primary/30 px-3.5 py-2.5 text-xs font-semibold transition-all shadow-sm shrink-0 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        title="Download current folder as ZIP archive"
       >
-        <ChevronsUpDown class="h-3.5 w-3.5 text-primary" />
-        <span class="hidden sm:inline">{isAllCollapsed ? "Expand All" : "Collapse All"}</span>
+        {#if isDownloadingZip}
+          <div class="h-3.5 w-3.5 rounded-full border-2 border-primary border-t-transparent animate-spin shrink-0"></div>
+          <span>Preparing ZIP...</span>
+        {:else}
+          <Download class="h-3.5 w-3.5 shrink-0" />
+          <span>Download ZIP</span>
+        {/if}
       </button>
-    {/if}
+
+      {#if groupedPhotos.length > 0}
+        <button
+          type="button"
+          onclick={() => isAllCollapsed ? expandAllDates() : collapseAllDates()}
+          class="inline-flex items-center gap-1.5 rounded-xl border border-border/60 bg-card px-3 py-2.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-all shadow-sm shrink-0"
+          title={isAllCollapsed ? "Expand all date groups" : "Collapse all date groups"}
+        >
+          <ChevronsUpDown class="h-3.5 w-3.5 text-primary" />
+          <span class="hidden sm:inline">{isAllCollapsed ? "Expand All" : "Collapse All"}</span>
+        </button>
+      {/if}
+    </div>
   </div>
+
+  <!-- ZIP Download Error Banner -->
+  {#if zipError}
+    <div class="mb-4 shrink-0">
+      <ErrorBanner
+        message={zipError}
+        onRetry={handleDownloadZip}
+      />
+    </div>
+  {/if}
 
   <!-- Internal Single Scroll Container -->
   <div class="flex-1 overflow-y-auto min-h-0 pr-1 space-y-6">
@@ -314,11 +365,7 @@
 
     <!-- Loading State -->
     {#if $query.isLoading}
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mt-2">
-        {#each Array(10) as _, i}
-          <div class="aspect-square w-full rounded-xl bg-muted/60 animate-pulse"></div>
-        {/each}
-      </div>
+      <Skeleton type="folder-view" count={12} />
 
     <!-- Error State -->
     {:else if $query.isError}
