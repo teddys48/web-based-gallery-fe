@@ -1,10 +1,11 @@
 <script lang="ts">
   import { createInfiniteQuery } from '@tanstack/svelte-query';
+  import { derived } from 'svelte/store';
   import { getTimelinePhotos, getPhotosByDate, isVideoMedia } from '$lib/api/client';
   import PhotoCard from '$features/grid/PhotoCard.svelte';
   import EmptyState from '$lib/components/common/EmptyState.svelte';
   import ErrorBanner from '$lib/components/common/ErrorBanner.svelte';
-  import { activeBucketFilterStore, lightboxStore } from '$lib/stores/uiStore';
+  import { activeBucketFilterStore, lightboxStore, type BucketFilter } from '$lib/stores/uiStore';
   import { Calendar, Filter, X, ChevronRight, ChevronsUpDown } from 'lucide-svelte';
   import type { Photo, PaginatedResponse } from '$lib/types/photo';
   import { format, parseISO, isToday, isYesterday } from 'date-fns';
@@ -40,7 +41,7 @@
     return groupedPhotos.every(g => collapsedDates[g.dateKey]);
   });
 
-  // Main TanStack Query Infinite Query for Timeline
+  // Main TanStack Query Infinite Query for Unfiltered Timeline
   const mainTimelineQuery = createInfiniteQuery<PaginatedResponse<Photo>>({
     queryKey: ['photos', 'timeline'],
     queryFn: ({ pageParam = 1 }) => getTimelinePhotos(pageParam as number, 50),
@@ -54,58 +55,56 @@
     return $mainTimelineQuery.data.pages.flatMap((page) => (page && Array.isArray(page.items)) ? page.items : []);
   });
 
-  // Check if active filter can be fully satisfied from already fetched main timeline photos
-  const isSatisfiedByMainTimeline = $derived.by(() => {
-    if (!filter) return false;
-    const matched = mainTimelinePhotos.filter(photo => {
-      if (!photo?.taken_at) return false;
-      const dStr = photo.taken_at.split('T')[0];
-      if (filter.date) {
-        if (filter.date.length === 7 ? !dStr.startsWith(filter.date) : dStr !== filter.date) return false;
-      }
-      if (filter.start_date && dStr < filter.start_date) return false;
-      if (filter.end_date && dStr > filter.end_date) return false;
-      const dt = new Date(photo.taken_at);
-      if (filter.year !== undefined && dt.getFullYear() !== filter.year) return false;
-      if (filter.month !== undefined && (dt.getMonth() + 1) !== filter.month) return false;
-      if (filter.media_type) {
-        const isVid = isVideoMedia(photo);
-        if (filter.media_type === 'video' && !isVid) return false;
-        if (filter.media_type === 'image' && isVid) return false;
-      }
-      return true;
-    });
+  const emptyPaginatedResponse: PaginatedResponse<Photo> = {
+    items: [],
+    page: 1,
+    limit: 50,
+    total: 0,
+    total_pages: 1,
+    has_next: false,
+    has_prev: false
+  };
 
-    if (filter.expected_count !== undefined && filter.expected_count > 0 && matched.length >= filter.expected_count) {
-      return true;
-    }
-    if (!$mainTimelineQuery.hasNextPage && mainTimelinePhotos.length > 0) {
-      return true;
-    }
-    return false;
-  });
-
-  // Dedicated By-Date query when filter is active and not satisfied by main timeline
-  const byDateQuery = createInfiniteQuery<PaginatedResponse<Photo>>({
-    queryKey: ['photos', 'by-date', filter?.date ?? '', filter?.start_date ?? '', filter?.end_date ?? '', filter?.year ?? '', filter?.month ?? '', filter?.media_type ?? ''],
-    queryFn: ({ pageParam = 1 }) => {
-      if (!filter) {
-        return Promise.resolve({ items: [], page: 1, limit: 50, total: 0, total_pages: 1, has_next: false, has_prev: false });
+  // Dedicated By-Date query store derived dynamically from activeBucketFilterStore
+  const byDateQueryOptions = derived(activeBucketFilterStore, ($filter: BucketFilter | null) => ({
+    queryKey: [
+      'photos',
+      'by-date',
+      $filter?.date ?? '',
+      $filter?.start_date ?? '',
+      $filter?.end_date ?? '',
+      $filter?.year ?? '',
+      $filter?.month ?? '',
+      $filter?.media_type ?? ''
+    ],
+    queryFn: ({ pageParam = 1 }: { pageParam?: unknown }): Promise<PaginatedResponse<Photo>> => {
+      if (!$filter) {
+        return Promise.resolve(emptyPaginatedResponse);
       }
       return getPhotosByDate({
-        date: filter.date,
-        start_date: filter.start_date,
-        end_date: filter.end_date,
-        year: filter.year,
-        month: filter.month,
-        media_type: filter.media_type,
-        page: pageParam as number,
+        date: $filter.date,
+        start_date: $filter.start_date,
+        end_date: $filter.end_date,
+        year: $filter.year,
+        month: $filter.month,
+        media_type: $filter.media_type,
+        page: (pageParam as number) || 1,
         limit: 50
       });
     },
     getNextPageParam: (lastPage: PaginatedResponse<Photo>) => lastPage.has_next ? (lastPage.page + 1) : undefined,
     initialPageParam: 1,
-    enabled: Boolean(filter && !isSatisfiedByMainTimeline)
+    enabled: Boolean($filter)
+  }));
+
+  const byDateQuery = createInfiniteQuery(byDateQueryOptions);
+
+  // Re-fetch byDateQuery whenever activeBucketFilterStore changes
+  $effect(() => {
+    const f = $activeBucketFilterStore;
+    if (f) {
+      $byDateQuery.refetch();
+    }
   });
 
   const byDatePhotos = $derived.by(() => {
@@ -113,38 +112,20 @@
     return $byDateQuery.data.pages.flatMap((page) => (page && Array.isArray(page.items)) ? page.items : []);
   });
 
-  // Active query pointer (evaluates to result of either $byDateQuery or $mainTimelineQuery)
+  // Active query pointer
   const activeQuery = $derived.by(() => {
-    if (filter && !isSatisfiedByMainTimeline) {
+    if (filter) {
       return $byDateQuery;
     }
     return $mainTimelineQuery;
   });
 
-  // Active photos list
+  // Active photos list for display
   const filteredPhotos = $derived.by(() => {
-    if (!filter) return mainTimelinePhotos;
-    if (!isSatisfiedByMainTimeline && byDatePhotos.length > 0) {
+    if (filter) {
       return byDatePhotos;
     }
-    return mainTimelinePhotos.filter((photo) => {
-      if (!photo?.taken_at) return false;
-      const dStr = photo.taken_at.split('T')[0];
-      if (filter.date) {
-        if (filter.date.length === 7 ? !dStr.startsWith(filter.date) : dStr !== filter.date) return false;
-      }
-      if (filter.start_date && dStr < filter.start_date) return false;
-      if (filter.end_date && dStr > filter.end_date) return false;
-      const date = new Date(photo.taken_at);
-      const matchYear = filter.year !== undefined ? date.getFullYear() === filter.year : true;
-      const matchMonth = filter.month !== undefined ? (date.getMonth() + 1) === filter.month : true;
-      if (filter.media_type) {
-        const isVid = isVideoMedia(photo);
-        if (filter.media_type === 'video' && !isVid) return false;
-        if (filter.media_type === 'image' && isVid) return false;
-      }
-      return matchYear && matchMonth;
-    });
+    return mainTimelinePhotos;
   });
 
   // Filter tag text for UI
@@ -235,7 +216,7 @@
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && activeQuery.hasNextPage && !activeQuery.isFetchingNextPage) {
-          if (filter && !isSatisfiedByMainTimeline) {
+          if (filter) {
             $byDateQuery.fetchNextPage();
           } else {
             $mainTimelineQuery.fetchNextPage();
