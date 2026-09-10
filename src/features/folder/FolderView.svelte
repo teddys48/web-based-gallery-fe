@@ -43,14 +43,6 @@
     initialPageParam: 1
   });
 
-  // Re-fetch query when selectedFolderPathStore changes
-  $effect(() => {
-    const current = $selectedFolderPathStore;
-    if (current !== undefined) {
-      $query.refetch();
-    }
-  });
-
   // Calculate breadcrumbs from folderPath
   const breadcrumbs = $derived.by(() => {
     if (!folderPath) return [];
