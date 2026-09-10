@@ -99,14 +99,6 @@
 
   const byDateQuery = createInfiniteQuery(byDateQueryOptions);
 
-  // Re-fetch byDateQuery whenever activeBucketFilterStore changes
-  $effect(() => {
-    const f = $activeBucketFilterStore;
-    if (f) {
-      $byDateQuery.refetch();
-    }
-  });
-
   const byDatePhotos = $derived.by(() => {
     if (!$byDateQuery.data || !Array.isArray($byDateQuery.data.pages)) return [];
     return $byDateQuery.data.pages.flatMap((page) => (page && Array.isArray(page.items)) ? page.items : []);

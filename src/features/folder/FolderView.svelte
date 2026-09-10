@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createInfiniteQuery } from '@tanstack/svelte-query';
+  import { derived } from 'svelte/store';
   import { getFolderContents, getFolderThumbnailUrl } from '$lib/api/client';
   import PhotoCard from '$features/grid/PhotoCard.svelte';
   import EmptyState from '$lib/components/common/EmptyState.svelte';
@@ -35,13 +36,16 @@
     return groupedPhotos.every(g => collapsedDates[g.dateKey]);
   });
 
-  // TanStack Query for /api/v1/folders/contents
-  const query = createInfiniteQuery<FolderContentsResponse>({
-    queryKey: ['folderContents', $selectedFolderPathStore],
-    queryFn: ({ pageParam = 1 }) => getFolderContents($selectedFolderPathStore, pageParam as number, 50),
+  // TanStack Query for /api/v1/folders/contents derived dynamically from selectedFolderPathStore
+  const folderQueryOptions = derived(selectedFolderPathStore, ($path: string) => ({
+    queryKey: ['folderContents', $path ?? ''],
+    queryFn: ({ pageParam = 1 }: { pageParam?: unknown }): Promise<FolderContentsResponse> =>
+      getFolderContents($path ?? '', (pageParam as number) || 1, 50),
     getNextPageParam: (lastPage: FolderContentsResponse) => lastPage.has_next ? (lastPage.page + 1) : undefined,
     initialPageParam: 1
-  });
+  }));
+
+  const query = createInfiniteQuery(folderQueryOptions);
 
   // Calculate breadcrumbs from folderPath
   const breadcrumbs = $derived.by(() => {
