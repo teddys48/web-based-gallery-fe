@@ -5,7 +5,7 @@
     ChevronRight,
     ChevronDown,
     Calendar,
-    HardDrive,
+    Images,
     X,
     LayoutGrid
   } from 'lucide-svelte';
@@ -261,19 +261,21 @@
       </div>
     </div>
 
-    <!-- Fixed Pinned Storage Stats Card at Bottom -->
+    <!-- Fixed Pinned Total Media Card at Bottom -->
     <div class="p-4 border-t border-border/40 shrink-0 bg-background/95 backdrop-blur-xl">
-      <div class="rounded-xl bg-card p-3 border border-border/50 shadow-sm">
-        <div class="flex items-center justify-between mb-2">
-          <div class="flex items-center gap-2 text-xs font-semibold">
-            <HardDrive class="h-4 w-4 text-primary" />
-            <span>Storage Summary</span>
+      <div class="flex items-center justify-between rounded-xl bg-card p-3 border border-border/50 shadow-sm">
+        <div class="flex items-center gap-2.5">
+          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Images class="h-4 w-4" />
           </div>
-          <span class="text-[10px] font-mono text-muted-foreground">{totalPhotosCount} items</span>
+          <div>
+            <p class="text-xs font-bold text-foreground">Total Media</p>
+            <p class="text-[10px] text-muted-foreground font-medium">Gallery Collection</p>
+          </div>
         </div>
-        <div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-          <div class="h-full bg-primary rounded-full w-[45%]"></div>
-        </div>
+        <span class="rounded-full bg-primary/10 border border-primary/20 px-2.5 py-1 font-mono text-xs font-semibold text-primary">
+          {totalPhotosCount} items
+        </span>
       </div>
     </div>
 
