@@ -180,22 +180,29 @@
 
   let isDownloadingZip = $state(false);
   let zipError = $state<string | null>(null);
+  let zipErrorTimeout: ReturnType<typeof setTimeout> | null = null;
 
   async function handleDownloadZip() {
     if (isDownloadingZip) return;
     isDownloadingZip = true;
+    if (zipErrorTimeout) clearTimeout(zipErrorTimeout);
     zipError = null;
 
     try {
       await downloadFolderZip(folderPath || '');
     } catch (err: any) {
       zipError = err?.message || 'Failed to download ZIP archive';
+      // Automatically clear ZIP download error after 5 seconds
+      zipErrorTimeout = setTimeout(() => {
+        zipError = null;
+      }, 5000);
     } finally {
       isDownloadingZip = false;
     }
   }
 
   function clearZipError() {
+    if (zipErrorTimeout) clearTimeout(zipErrorTimeout);
     zipError = null;
   }
 
@@ -301,6 +308,7 @@
       <ErrorBanner
         message={zipError}
         onRetry={handleDownloadZip}
+        onClose={clearZipError}
       />
     </div>
   {/if}
