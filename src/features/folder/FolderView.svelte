@@ -142,12 +142,22 @@
 
   type SortOption = 'newest' | 'oldest' | 'name_asc' | 'name_desc';
   let sortBy = $state<SortOption>('newest');
+  let groupSortBy = $state<Record<string, SortOption>>({});
   let selectedTimelineBucketKey = $state<string>('ALL');
 
+  function getGroupSort(dateKey: string): SortOption {
+    return groupSortBy[dateKey] || sortBy;
+  }
+
+  function setGroupSort(dateKey: string, option: SortOption) {
+    groupSortBy[dateKey] = option;
+  }
+
   $effect(() => {
-    // Reset timeline filter when folder changes
+    // Reset timeline filter and group sorts when folder changes
     folderPath;
     selectedTimelineBucketKey = 'ALL';
+    groupSortBy = {};
   });
 
   interface FolderTimelineBucket {
@@ -228,7 +238,7 @@
     return list;
   });
 
-  // Sorted date groups and photos according to selected SortOption and Timeline Filter
+  // Sorted date groups and photos according to selected SortOption, Timeline Filter, and per-group Sort
   const sortedGroupedPhotos = $derived.by(() => {
     if (!timelineFilteredGroupedPhotos.length) return [];
 
@@ -238,13 +248,14 @@
       photos: [...g.photos]
     }));
 
-    // 1. Sort photos inside each date group
+    // 1. Sort photos inside each date group according to its groupSort (or global sortBy)
     groups.forEach(g => {
-      if (sortBy === 'name_asc') {
+      const gSort = groupSortBy[g.dateKey] || sortBy;
+      if (gSort === 'name_asc') {
         g.photos.sort((a, b) => (a.photo.file_name || '').localeCompare(b.photo.file_name || '', undefined, { numeric: true, sensitivity: 'base' }));
-      } else if (sortBy === 'name_desc') {
+      } else if (gSort === 'name_desc') {
         g.photos.sort((a, b) => (b.photo.file_name || '').localeCompare(a.photo.file_name || '', undefined, { numeric: true, sensitivity: 'base' }));
-      } else if (sortBy === 'oldest') {
+      } else if (gSort === 'oldest') {
         g.photos.sort((a, b) => (a.photo.taken_at || '').localeCompare(b.photo.taken_at || ''));
       } else {
         // default 'newest'
@@ -602,6 +613,29 @@
                 </div>
 
                 <div class="flex items-center gap-2">
+                  <!-- Sort dropdown per timeline date card -->
+                  <div class="relative inline-flex items-center">
+                    <select
+                      value={getGroupSort(group.dateKey)}
+                      onchange={(e) => {
+                        e.stopPropagation();
+                        setGroupSort(group.dateKey, e.currentTarget.value as SortOption);
+                      }}
+                      onclick={(e) => e.stopPropagation()}
+                      onkeydown={(e) => e.stopPropagation()}
+                      class="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-card/80 px-2 py-0.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:bg-accent focus:outline-none focus:ring-1 focus:ring-primary/50 shadow-xs cursor-pointer appearance-none pr-5 pl-2"
+                      aria-label="Sort timeline card items"
+                    >
+                      <option value="newest">Sort: Newest</option>
+                      <option value="oldest">Sort: Oldest</option>
+                      <option value="name_asc">Sort: Name (A-Z)</option>
+                      <option value="name_desc">Sort: Name (Z-A)</option>
+                    </select>
+                    <div class="pointer-events-none absolute right-1.5 flex items-center text-muted-foreground">
+                      <ArrowUpDown class="h-3 w-3 opacity-60" />
+                    </div>
+                  </div>
+
                   {#if isCollapsed}
                     <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full animate-fade-in">
                       Collapsed
