@@ -7,7 +7,7 @@
   import ErrorBanner from '$lib/components/common/ErrorBanner.svelte';
   import Skeleton from '$lib/components/common/Skeleton.svelte';
   import { selectedFolderPathStore, lightboxStore } from '$lib/stores/uiStore';
-  import { Folder, FolderOpen, ChevronRight, Home, ArrowLeft, Calendar, ChevronsUpDown, Download, X } from 'lucide-svelte';
+  import { Folder, FolderOpen, ChevronRight, Home, ArrowLeft, Calendar, ChevronsUpDown, Download, X, ArrowUpDown, Filter } from 'lucide-svelte';
   import type { FolderContentsResponse, SubFolderNode, Photo } from '$lib/types/photo';
   import { format, parseISO, isToday, isYesterday } from 'date-fns';
   import { slide } from 'svelte/transition';
@@ -24,7 +24,7 @@
 
   function collapseAllDates() {
     const next: Record<string, boolean> = {};
-    groupedPhotos.forEach(g => { next[g.dateKey] = true; });
+    sortedGroupedPhotos.forEach(g => { next[g.dateKey] = true; });
     collapsedDates = next;
   }
 
@@ -33,8 +33,8 @@
   }
 
   const isAllCollapsed = $derived.by(() => {
-    if (!groupedPhotos.length) return false;
-    return groupedPhotos.every(g => collapsedDates[g.dateKey]);
+    if (!sortedGroupedPhotos.length) return false;
+    return sortedGroupedPhotos.every(g => collapsedDates[g.dateKey]);
   });
 
   // TanStack Query for /api/v1/folders/contents derived dynamically from selectedFolderPathStore
@@ -140,6 +140,149 @@
     return groups;
   });
 
+  type SortOption = 'newest' | 'oldest' | 'name_asc' | 'name_desc';
+  let sortBy = $state<SortOption>('newest');
+  let selectedTimelineBucketKey = $state<string>('ALL');
+
+  $effect(() => {
+    // Reset timeline filter when folder changes
+    folderPath;
+    selectedTimelineBucketKey = 'ALL';
+  });
+
+  interface FolderTimelineBucket {
+    key: string;
+    label: string;
+    count: number;
+  }
+
+  // Generate timeline buckets (month/year) from folder media
+  const folderTimelineBuckets = $derived.by(() => {
+    if (!groupedPhotos.length) return [];
+
+    const bucketMap = new Map<string, { label: string; count: number }>();
+    let totalCount = 0;
+
+    groupedPhotos.forEach(group => {
+      const dateKey = group.dateKey;
+      totalCount += group.photos.length;
+      if (dateKey === 'Unknown Date') {
+        const existing = bucketMap.get('UNKNOWN') || { label: 'Unknown Date', count: 0 };
+        existing.count += group.photos.length;
+        bucketMap.set('UNKNOWN', existing);
+        return;
+      }
+
+      try {
+        const yearMonthKey = dateKey.substring(0, 7); // "YYYY-MM"
+        const parsed = parseISO(dateKey);
+        const monthLabel = format(parsed, 'MMMM yyyy'); // e.g. "August 2024"
+
+        const existing = bucketMap.get(yearMonthKey) || { label: monthLabel, count: 0 };
+        existing.count += group.photos.length;
+        bucketMap.set(yearMonthKey, existing);
+      } catch {
+        const existing = bucketMap.get('UNKNOWN') || { label: 'Unknown Date', count: 0 };
+        existing.count += group.photos.length;
+        bucketMap.set('UNKNOWN', existing);
+      }
+    });
+
+    const sortedKeys = Array.from(bucketMap.keys()).sort((a, b) => b.localeCompare(a));
+
+    const buckets: FolderTimelineBucket[] = [
+      { key: 'ALL', label: 'All Timelines', count: totalCount }
+    ];
+
+    sortedKeys.forEach(k => {
+      const b = bucketMap.get(k)!;
+      buckets.push({
+        key: k,
+        label: `${b.label} (${b.count})`,
+        count: b.count
+      });
+    });
+
+    return buckets;
+  });
+
+  // Filter date groups by selected timeline bucket
+  const timelineFilteredGroupedPhotos = $derived.by(() => {
+    if (selectedTimelineBucketKey === 'ALL') return groupedPhotos;
+
+    return groupedPhotos.filter(g => {
+      if (selectedTimelineBucketKey === 'UNKNOWN') return g.dateKey === 'Unknown Date';
+      return g.dateKey.startsWith(selectedTimelineBucketKey);
+    });
+  });
+
+  // Sorted sub-folders according to selected SortOption
+  const sortedSubfolders = $derived.by(() => {
+    const list = [...subfolders];
+    if (sortBy === 'name_asc') {
+      return list.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' }));
+    }
+    if (sortBy === 'name_desc') {
+      return list.sort((a, b) => (b.name || '').localeCompare(a.name || '', undefined, { numeric: true, sensitivity: 'base' }));
+    }
+    return list;
+  });
+
+  // Sorted date groups and photos according to selected SortOption and Timeline Filter
+  const sortedGroupedPhotos = $derived.by(() => {
+    if (!timelineFilteredGroupedPhotos.length) return [];
+
+    const groups = timelineFilteredGroupedPhotos.map(g => ({
+      dateKey: g.dateKey,
+      displayDate: g.displayDate,
+      photos: [...g.photos]
+    }));
+
+    // 1. Sort photos inside each date group
+    groups.forEach(g => {
+      if (sortBy === 'name_asc') {
+        g.photos.sort((a, b) => (a.photo.file_name || '').localeCompare(b.photo.file_name || '', undefined, { numeric: true, sensitivity: 'base' }));
+      } else if (sortBy === 'name_desc') {
+        g.photos.sort((a, b) => (b.photo.file_name || '').localeCompare(a.photo.file_name || '', undefined, { numeric: true, sensitivity: 'base' }));
+      } else if (sortBy === 'oldest') {
+        g.photos.sort((a, b) => (a.photo.taken_at || '').localeCompare(b.photo.taken_at || ''));
+      } else {
+        // default 'newest'
+        g.photos.sort((a, b) => (b.photo.taken_at || '').localeCompare(a.photo.taken_at || ''));
+      }
+    });
+
+    // 2. Sort the date groups themselves
+    if (sortBy === 'oldest') {
+      groups.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+    } else if (sortBy === 'newest') {
+      groups.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+    } else if (sortBy === 'name_asc') {
+      groups.sort((a, b) => {
+        const nameA = a.photos[0]?.photo?.file_name || '';
+        const nameB = b.photos[0]?.photo?.file_name || '';
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      });
+    } else if (sortBy === 'name_desc') {
+      groups.sort((a, b) => {
+        const nameA = a.photos[0]?.photo?.file_name || '';
+        const nameB = b.photos[0]?.photo?.file_name || '';
+        return nameB.localeCompare(nameA, undefined, { numeric: true, sensitivity: 'base' });
+      });
+    }
+
+    // 3. Re-index globalIndex so Lightbox opens and navigates in exact sorted order
+    let currentIndex = 0;
+    groups.forEach(g => {
+      g.photos = g.photos.map(p => ({
+        photo: p.photo,
+        globalIndex: currentIndex++
+      }));
+    });
+
+    return groups;
+  });
+
   // Parent folder path from response
   const parentFolder = $derived.by(() => {
     if ($query.data && $query.data.pages.length > 0 && $query.data.pages[0].parent_folder !== undefined) {
@@ -167,7 +310,7 @@
   }
 
   const displayPhotosList = $derived.by(() => {
-    return groupedPhotos.flatMap(g => g.photos.map(p => p.photo));
+    return sortedGroupedPhotos.flatMap(g => g.photos.map(p => p.photo));
   });
 
   function handlePhotoClick(photo: Photo, globalIndex: number) {
@@ -271,7 +414,45 @@
     </nav>
 
     <!-- Folder Action Buttons -->
-    <div class="flex items-center gap-2 shrink-0">
+    <div class="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+      <!-- Timeline Bucket Selector Dropdown -->
+      {#if folderTimelineBuckets.length > 1}
+        <div class="relative inline-flex items-center">
+          <select
+            value={selectedTimelineBucketKey}
+            onchange={(e) => selectedTimelineBucketKey = e.currentTarget.value}
+            class="inline-flex items-center gap-1.5 rounded-xl border border-border/60 bg-card px-3 py-2 text-xs font-semibold text-foreground hover:bg-accent focus:outline-none focus:ring-2 focus:ring-primary/50 shadow-sm transition-all cursor-pointer appearance-none pr-7 pl-3"
+            aria-label="Filter timeline bucket"
+          >
+            {#each folderTimelineBuckets as bucket}
+              <option value={bucket.key}>{bucket.key === 'ALL' ? 'Timeline: All' : bucket.label}</option>
+            {/each}
+          </select>
+          <div class="pointer-events-none absolute right-2 flex items-center text-muted-foreground">
+            <Filter class="h-3.5 w-3.5 opacity-70 text-primary" />
+          </div>
+        </div>
+      {/if}
+
+      <!-- Sort Selector Dropdown -->
+      <div class="relative inline-flex items-center">
+        <select
+          value={sortBy}
+          onchange={(e) => sortBy = (e.currentTarget.value as SortOption)}
+          class="inline-flex items-center gap-1.5 rounded-xl border border-border/60 bg-card px-3 py-2 text-xs font-semibold text-foreground hover:bg-accent focus:outline-none focus:ring-2 focus:ring-primary/50 shadow-sm transition-all cursor-pointer appearance-none pr-7 pl-3"
+          aria-label="Sort folder items"
+        >
+          <option value="newest">Sort: Newest</option>
+          <option value="oldest">Sort: Oldest</option>
+          <option value="name_asc">Sort: Name (A-Z)</option>
+          <option value="name_desc">Sort: Name (Z-A)</option>
+        </select>
+        <div class="pointer-events-none absolute right-2 flex items-center text-muted-foreground">
+          <ArrowUpDown class="h-3.5 w-3.5 opacity-70" />
+        </div>
+      </div>
+
+      <!-- Download ZIP Button -->
       <button
         type="button"
         onclick={handleDownloadZip}
@@ -284,11 +465,11 @@
           <span>Preparing ZIP...</span>
         {:else}
           <Download class="h-3.5 w-3.5 shrink-0" />
-          <span>Download ZIP</span>
+          <span class="hidden sm:inline">Download ZIP</span>
         {/if}
       </button>
 
-      {#if groupedPhotos.length > 0}
+      {#if sortedGroupedPhotos.length > 0}
         <button
           type="button"
           onclick={() => isAllCollapsed ? expandAllDates() : collapseAllDates()}
@@ -317,18 +498,18 @@
   <div class="flex-1 overflow-y-auto min-h-0 pr-1 space-y-6">
     
     <!-- Sub-Folders Section with Cover Thumbnails -->
-    {#if subfolders.length > 0}
+    {#if sortedSubfolders.length > 0}
       <div>
         <div class="flex items-center justify-between mb-3 px-1">
           <h3 class="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
             <Folder class="h-3.5 w-3.5 text-amber-500" />
-            <span>Sub-Folders ({subfolders.length})</span>
+            <span>Sub-Folders ({sortedSubfolders.length})</span>
           </h3>
           <span class="text-[10px] text-muted-foreground">Click a folder to open</span>
         </div>
 
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-          {#each subfolders as sub (sub.path)}
+          {#each sortedSubfolders as sub (sub.path)}
             {@const folderThumbUrl = getFolderThumbnailUrl(sub)}
             <button
               type="button"
@@ -384,16 +565,26 @@
 
     <!-- Date Grouped Media View & Empty State -->
     {:else}
-      {#if groupedPhotos.length > 0}
+      {#if sortedGroupedPhotos.length > 0}
         <div class="space-y-6">
-          <div class="mb-3 px-1">
+          <div class="mb-3 px-1 flex items-center justify-between flex-wrap gap-2">
             <h3 class="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
               <Calendar class="h-3.5 w-3.5 text-primary" />
-              <span>Media in {currentFolderTitle} ({allPhotos.length})</span>
+              <span>Media in {currentFolderTitle} ({displayPhotosList.length})</span>
             </h3>
+            {#if selectedTimelineBucketKey !== 'ALL'}
+              <button
+                type="button"
+                onclick={() => selectedTimelineBucketKey = 'ALL'}
+                class="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/30 px-3 py-1 text-xs font-semibold text-primary hover:bg-primary/20 transition-all cursor-pointer shadow-sm"
+              >
+                <span>Timeline Filter: {folderTimelineBuckets.find(b => b.key === selectedTimelineBucketKey)?.label.split(' (')[0]}</span>
+                <X class="h-3.5 w-3.5" />
+              </button>
+            {/if}
           </div>
 
-          {#each groupedPhotos as group (group.dateKey)}
+          {#each sortedGroupedPhotos as group (group.dateKey)}
             {@const isCollapsed = collapsedDates[group.dateKey] ?? false}
             <div class="space-y-3">
               <!-- Interactive Collapsible Date Header Banner -->
@@ -452,6 +643,14 @@
             {/if}
           </div>
         </div>
+      {:else if selectedTimelineBucketKey !== 'ALL'}
+        <EmptyState
+          title="No media in selected timeline"
+          description="There are no photos matching the selected timeline filter in this folder."
+          icon="image"
+          actionLabel="Clear Timeline Filter"
+          onAction={() => selectedTimelineBucketKey = 'ALL'}
+        />
       {:else if subfolders.length === 0}
         <EmptyState
           title="This folder is empty"

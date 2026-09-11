@@ -20,6 +20,7 @@ Seamlessly integrated with the [gallery-be](../gallery-be) backend (Go Fiber + S
 - **Folder Tree Hierarchy**: Sidebar directory tree navigation featuring item count statistics per folder.
 - **Breadcrumb Navigation**: Responsive path breadcrumbs (`Root / Vacation2025 / Bali`).
 - **Sub-Folder Cards**: Interactive subfolder cards featuring auto-generated cover thumbnails.
+- **Sorting & Timeline Filtering**: Interactive sort controls supporting **Newest**, **Oldest**, **Name (A-Z)**, and **Name (Z-A)** sorting, alongside dynamic **Timeline Bucket filtering (Year/Month)** for folder media, seamlessly updating grid layouts and Lightbox navigation order.
 - **📦 Download Folder ZIP**: A dedicated _"Download ZIP"_ button to stream-download the current directory and all its subfolders (`GET /api/v1/folders/download?path=...`) directly as a `.zip` archive via HTTP streaming. Includes a _"Preparing ZIP..."_ loading state, double-click protection, and responsive error handling (400, 403, 404).
 
 ### 3. 🎬 Video Media & Thumbnail Service
